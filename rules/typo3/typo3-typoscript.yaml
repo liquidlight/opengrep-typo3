@@ -1,0 +1,36 @@
+rules:
+  - id: typo3-html-sanitizer-disabled
+    languages: [generic]
+    severity: WARNING
+    paths:
+      include: ["*.typoscript", "*.ts", "*.txt", "*.tsconfig", "setup.*", "constants.*"]
+    message: >-
+      htmlSanitize = 0 turns off TYPO3's HTML sanitizer for this parseFunc, so editor or imported HTML is
+      output with scripts and event handlers intact. Allow the extra tags in a custom sanitizer build
+      instead (see the htmlSanitize documentation).
+    metadata:
+      category: security
+      cwe: ["CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"]
+      references: [https://docs.typo3.org/m/typo3/reference-typoscript/main/en-us/Functions/Parsefunc.html#htmlsanitize]
+      confidence: HIGH
+      likelihood: LOW
+      impact: MEDIUM
+    pattern-regex: htmlSanitize\s*=\s*0\b
+
+  - id: typo3-rte-allows-dangerous-tags
+    languages: [generic]
+    severity: WARNING
+    paths:
+      include: ["*.typoscript", "*.tsconfig", "*.ts", "*.txt", "*.yaml", "*.yml"]
+    message: >-
+      The RTE or parseFunc allows <script>, <iframe>, <object> or <embed>, which lets editors (or a
+      compromised editor account) add code to every page that shows this content. Use a content element
+      or plugin for embeds instead.
+    metadata:
+      category: security
+      subcategory: [audit]
+      cwe: ["CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"]
+      confidence: MEDIUM
+      likelihood: LOW
+      impact: MEDIUM
+    pattern-regex: (?i)allow(Tags|TagsOutside|edTags|Content)\b[^\n]*\b(script|iframe|object|embed)\b

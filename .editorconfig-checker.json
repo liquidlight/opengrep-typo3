@@ -1,0 +1,6 @@
+{
+	"Exclude": ["^LICENSE$", "^build/"],
+	"Disable": {
+		"IndentSize": true
+	}
+}

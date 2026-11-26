@@ -1,0 +1,134 @@
+#!/bin/sh
+# Scans a TYPO3 project with the rules in this image.
+#
+# Usage:
+#   opengrep-typo3 scan [--baseline-commit <sha>] [--fail-on error|none] [--output-dir <dir>] [--summary-only] [<path>]
+#   opengrep-typo3 ci
+#
+# scan  Scans <path> (default: the current folder), prints the findings and writes opengrep.json and
+#       gl-code-quality-opengrep.json (GitLab Code Quality) to --output-dir (default: the current folder).
+#       With --baseline-commit, only findings that aren't in that commit are reported. Exits 1 when
+#       there are ERROR findings, unless --fail-on none, and 2 when opengrep itself fails.
+#
+# ci    Scans the project in a GitLab CI job:
+#       - merge requests fail on ERROR findings the merge request adds, then a full scan writes the
+#         Code Quality report, so the merge request widget can compare it with the target branch
+#       - other pipelines (the default branch) only write the report and never fail on findings
+set -u
+# The exclude patterns are globs that must reach opengrep as they are
+set -f
+
+RULES=${OPENGREP_RULES:-/rules}
+JOBS=${OPENGREP_JOBS:-4}
+# A merge request's merge base is looked for this many commits at a time, this many times
+DEEPEN_BY=${OPENGREP_DEEPEN_BY:-50}
+DEEPEN_ATTEMPTS=${OPENGREP_DEEPEN_ATTEMPTS:-10}
+
+# Vendored and generated code, tests and lock files. A project's .semgrepignore adds to these.
+EXCLUDES='--exclude-minified-files --exclude=*.min.js --exclude=*.min.css --exclude=**/libs/** --exclude=**/lib/** --exclude=**/vendor/** --exclude=node_modules --exclude=.ddev --exclude=**/Tests/** --exclude=*.spec.ts --exclude=*.test.ts --exclude=composer.lock --exclude=package-lock.json'
+
+usage() {
+	sed -n '2,/^set -u/p' "$0" | sed '$d; s/^# \{0,1\}//'
+}
+
+scan() {
+	baseline=''
+	fail_on=error
+	output_dir=.
+	summary_only=''
+	target=.
+
+	while [ $# -gt 0 ]; do
+		case $1 in
+			--baseline-commit) baseline=$2; shift 2 ;;
+			--fail-on) fail_on=$2; shift 2 ;;
+			--output-dir) output_dir=$2; shift 2 ;;
+			--summary-only) summary_only=1; shift ;;
+			-h|--help) usage; exit 0 ;;
+			-*) echo "Unknown option: $1" >&2; exit 2 ;;
+			*) target=$1; shift ;;
+		esac
+	done
+
+	case $fail_on in
+		error|none) ;;
+		*) echo "--fail-on must be error or none" >&2; exit 2 ;;
+	esac
+
+	json="$output_dir/opengrep.json"
+	report="$output_dir/gl-code-quality-opengrep.json"
+	mkdir -p "$output_dir"
+
+	# opengrep exits non-zero when it fails (invalid rules, git errors), never because of findings.
+	# EXCLUDES and OPENGREP_EXTRA_FLAGS are lists of options, split on spaces; globbing is off (set -f).
+	# shellcheck disable=SC2086
+	if [ -n "$summary_only" ]; then
+		opengrep scan --config "$RULES" --jobs "$JOBS" $EXCLUDES ${baseline:+--baseline-commit="$baseline"} ${OPENGREP_EXTRA_FLAGS:-} --json-output="$json" "$target" > /dev/null
+	else
+		opengrep scan --config "$RULES" --jobs "$JOBS" $EXCLUDES ${baseline:+--baseline-commit="$baseline"} ${OPENGREP_EXTRA_FLAGS:-} --json-output="$json" "$target"
+	fi || { echo "❌ opengrep failed" >&2; return 2; }
+
+	jq '[.results[] | {
+		description: (.extra.message | gsub("\\s+"; " ")),
+		check_name: (.check_id | split(".") | last),
+		fingerprint: .extra.fingerprint,
+		severity: ({ERROR: "critical", WARNING: "minor", INFO: "info"}[.extra.severity] // "info"),
+		location: {path: .path, lines: {begin: .start.line}}
+	}]' "$json" > "$report" || { echo "❌ Couldn't write the Code Quality report" >&2; return 2; }
+
+	errors=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' "$json")
+	summary=$(jq -r '[.results[].extra.severity] | group_by(.) | map("\(length) \(.[0])") | join(", ")' "$json")
+	echo "opengrep: ${summary:-no findings}${baseline:+ (new since ${baseline})}"
+
+	if [ "$fail_on" = error ] && [ "$errors" -gt 0 ]; then
+		echo "❌ ${errors} ERROR finding(s). Fix them, or add a '// nosemgrep: <rule-id>' comment with the reason if a finding is wrong."
+		return 1
+	fi
+	return 0
+}
+
+# Fetches enough history to find the merge base, as CI clones are shallow
+fetch_merge_base() {
+	base=$1
+	git cat-file -e "${base}^{commit}" 2> /dev/null || git fetch --quiet --depth=1 origin "$base" || return 1
+
+	attempt=0
+	until git merge-base "$base" HEAD > /dev/null 2>&1; do
+		attempt=$((attempt + 1))
+		[ "$attempt" -le "$DEEPEN_ATTEMPTS" ] || return 1
+		git fetch --quiet --deepen="$DEEPEN_BY" origin || return 1
+	done
+}
+
+ci() {
+	project_dir=${CI_PROJECT_DIR:-$PWD}
+	cd "$project_dir" || exit 2
+
+	gate=0
+	base=${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}
+	if [ -n "$base" ]; then
+		if fetch_merge_base "$base"; then
+			echo "Findings this merge request adds:"
+			# Runs first and writes outside the project: a baseline scan refuses to run with untracked files
+			scan --baseline-commit "$base" --output-dir "$(mktemp -d)"
+			gate=$?
+			[ "$gate" -eq 2 ] && exit 2
+		else
+			echo "⚠️ Couldn't find the merge base ${base} in the last $((DEEPEN_BY * DEEPEN_ATTEMPTS)) commits, so new findings can't be told apart from existing ones. Reporting only."
+		fi
+		echo
+		echo "All findings (for the Code Quality report):"
+		scan --fail-on none --summary-only --output-dir "$project_dir" || exit 2
+	else
+		scan --fail-on none --output-dir "$project_dir" || exit 2
+	fi
+
+	exit "$gate"
+}
+
+case ${1:-} in
+	scan) shift; scan "$@"; exit $? ;;
+	ci) ci ;;
+	-h|--help|'') usage ;;
+	*) echo "Unknown command: $1" >&2; usage >&2; exit 2 ;;
+esac

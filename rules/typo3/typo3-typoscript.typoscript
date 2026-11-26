@@ -1,0 +1,14 @@
+# ruleid: typo3-html-sanitizer-disabled
+lib.parseHtmlFunc.htmlSanitize = 0
+
+# ok: typo3-html-sanitizer-disabled
+lib.parseFunc_RTE.htmlSanitize = 1
+
+# ruleid: typo3-rte-allows-dangerous-tags
+RTE.default.proc.allowTags := addToList(iframe)
+
+# ruleid: typo3-rte-allows-dangerous-tags
+lib.parseFunc_RTE.allowTags := addToList(script)
+
+# ok: typo3-rte-allows-dangerous-tags
+RTE.default.proc.allowTags := addToList(figure)

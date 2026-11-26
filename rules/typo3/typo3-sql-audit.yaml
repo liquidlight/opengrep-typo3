@@ -1,0 +1,31 @@
+rules:
+  - id: typo3-sql-string-concatenation
+    languages: [php]
+    severity: WARNING
+    message: >-
+      A variable is concatenated into SQL. Opengrep can't follow request data across files (e.g. from a
+      controller into a repository), so check where this value comes from. Bind values with
+      $queryBuilder->createNamedParameter() and quote identifiers with $queryBuilder->quoteIdentifier().
+    metadata:
+      category: security
+      subcategory: [audit]
+      cwe: ["CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"]
+      confidence: LOW
+      likelihood: MEDIUM
+      impact: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: $QB->$METHOD("..." . $X, ...)
+          - pattern: $QB->$METHOD($X . "...", ...)
+          - pattern: $QB->$METHOD("..." . $X . "...", ...)
+          - pattern: $QB->$METHOD(sprintf("...", ..., $X, ...), ...)
+      - pattern-not: $QB->$METHOD("..." . (int) $Z, ...)
+      - pattern-not: $QB->$METHOD("..." . (int) $Z . "...", ...)
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(where|andWhere|orWhere|having|andHaving|orHaving|orderBy|addOrderBy|groupBy|addGroupBy|executeQuery|executeStatement|prepare|query|exec|sql_query|exec_SELECTquery|exec_SELECTgetRows|exec_SELECTgetSingleRow|exec_UPDATEquery|exec_DELETEquery|exec_SELECTcountRows)$
+      # Only plain variables, array items and properties: calls (createNamedParameter(), quoteIdentifier()),
+      # casts and constants are left alone
+      - metavariable-regex:
+          metavariable: $X
+          regex: ^\$[\w]+((->|::)\w+|\[[^\]]+\])*$

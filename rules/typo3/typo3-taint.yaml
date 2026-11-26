@@ -1,0 +1,235 @@
+rules:
+  - id: typo3-tainted-sql
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Request data reaches a SQL string. Bind it with $queryBuilder->createNamedParameter(), or quote
+      identifiers with $queryBuilder->quoteIdentifier(), instead of concatenating it into the query.
+    metadata:
+      category: security
+      cwe: ["CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"]
+      owasp: ["A03:2021 - Injection"]
+      confidence: MEDIUM
+      likelihood: HIGH
+      impact: HIGH
+      references: [https://docs.typo3.org/m/typo3/reference-coreapi/main/en-us/ApiOverview/Database/QueryBuilder/Index.html]
+    mode: taint
+    pattern-sources: &sources
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+      - pattern: GeneralUtility::_GP(...)
+      - pattern: GeneralUtility::_GET(...)
+      - pattern: GeneralUtility::_POST(...)
+      - pattern: GeneralUtility::_GPmerged(...)
+      - pattern: $REQ->getQueryParams()
+      - pattern: $REQ->getParsedBody()
+      - pattern: $REQ->getCookieParams()
+      - pattern: $REQ->getUploadedFiles()
+      # Extbase requests only: Symfony Console's $input->getArgument() is not user input
+      - pattern: $this->request->getArgument(...)
+      - pattern: $this->request->getArguments()
+      - pattern: $request->getArgument(...)
+      - pattern: $request->getArguments()
+      - pattern: $REQ->getHeaderLine(...)
+      # Extbase action arguments are mapped from the request (scalar int/float/bool ones are safe)
+      - patterns:
+          - pattern-inside: |
+              function $ACTION(..., $PARAM, ...) { ... }
+          - pattern-not-inside: |
+              function $ACTION(..., int $PARAM, ...) { ... }
+          - pattern-not-inside: |
+              function $ACTION(..., ?int $PARAM, ...) { ... }
+          - pattern-not-inside: |
+              function $ACTION(..., float $PARAM, ...) { ... }
+          - pattern-not-inside: |
+              function $ACTION(..., bool $PARAM, ...) { ... }
+          - metavariable-regex:
+              metavariable: $ACTION
+              regex: ^\w+Action$
+          - focus-metavariable: $PARAM
+    pattern-sanitizers: &sanitizers
+      - pattern: (int) $X
+      - pattern: (float) $X
+      - pattern: (bool) $X
+      - pattern: intval(...)
+      - pattern: $QB->createNamedParameter(...)
+      - pattern: $QB->quoteIdentifier(...)
+      - pattern: $QB->quoteIdentifiers(...)
+      - pattern: $C->quote(...)
+      - pattern: MathUtility::forceIntegerInRange(...)
+      - pattern: GeneralUtility::intExplode(...)
+      - pattern: rawurlencode(...)
+      - pattern: urlencode(...)
+      - pattern: http_build_query(...)
+      - pattern: $UB->build()
+      - pattern: $UB->buildFrontendUri()
+      - pattern: $UB->uriFor(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $QB->$METHOD($SQL, ...)
+              - pattern: $QB->expr()->$METHOD(..., $SQL, ...)
+          # Static calls on a class name, such as CommandUtility::exec(), aren't queries
+          - metavariable-regex:
+              metavariable: $QB
+              regex: ^(?![A-Za-z0-9_\\]+$)
+          - metavariable-regex:
+              metavariable: $METHOD
+              regex: ^(where|andWhere|orWhere|having|andHaving|orHaving|orderBy|addOrderBy|groupBy|addGroupBy|select|addSelect|selectLiteral|join|leftJoin|rightJoin|innerJoin|executeQuery|executeStatement|prepare|query|exec|sql_query|exec_SELECTquery|exec_SELECTgetRows|exec_SELECTgetSingleRow|exec_UPDATEquery|exec_DELETEquery|exec_SELECTcountRows)$
+          - focus-metavariable: $SQL
+
+  - id: typo3-tainted-redirect
+    languages: [php]
+    severity: WARNING
+    message: >-
+      Request data decides where the user is redirected (open redirect). Only redirect to URLs you built,
+      or check the target against the site's own host first.
+    metadata:
+      category: security
+      cwe: ["CWE-601: URL Redirection to Untrusted Site ('Open Redirect')"]
+      owasp: ["A01:2021 - Broken Access Control"]
+      confidence: MEDIUM
+      likelihood: MEDIUM
+      impact: MEDIUM
+    mode: taint
+    pattern-sources: *sources
+    pattern-sanitizers: *sanitizers
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: new RedirectResponse($URL, ...)
+              - pattern: HttpUtility::redirect($URL, ...)
+              - pattern: $this->redirectToUri($URL, ...)
+              - pattern: header("=~/^[Ll]ocation:/" . $URL, ...)
+          - focus-metavariable: $URL
+
+  - id: typo3-tainted-file-path
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Request data is used as a file path (path traversal). Look the file up by an ID through FAL
+      (ResourceFactory / FileRepository) instead of reading a path from the request.
+    metadata:
+      category: security
+      cwe: ["CWE-22: Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')"]
+      owasp: ["A01:2021 - Broken Access Control"]
+      confidence: MEDIUM
+      likelihood: MEDIUM
+      impact: HIGH
+    mode: taint
+    pattern-sources: *sources
+    pattern-sanitizers:
+      - pattern: basename(...)
+      - pattern: md5(...)
+      - pattern: sha1(...)
+      - pattern: hash(...)
+      - pattern: (int) $X
+      - pattern: intval(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: file_get_contents($P, ...)
+              - pattern: readfile($P, ...)
+              - pattern: fopen($P, ...)
+              - pattern: file($P, ...)
+              - pattern: unlink($P)
+              - pattern: include $P
+              - pattern: require $P
+              - pattern: include_once $P
+              - pattern: require_once $P
+              - pattern: GeneralUtility::getFileAbsFileName($P)
+              - pattern: GeneralUtility::writeFile($P, ...)
+              - pattern: GeneralUtility::unlink_tempfile($P)
+              - pattern: new FileResponse($P, ...)
+          - focus-metavariable: $P
+
+  - id: typo3-tainted-ssrf
+    languages: [php]
+    severity: WARNING
+    message: >-
+      Request data decides which URL the server fetches (server-side request forgery). Build the URL
+      from a fixed host and only let the request choose values you have validated.
+    metadata:
+      category: security
+      cwe: ["CWE-918: Server-Side Request Forgery (SSRF)"]
+      owasp: ["A10:2021 - Server-Side Request Forgery (SSRF)"]
+      confidence: MEDIUM
+      likelihood: MEDIUM
+      impact: HIGH
+    mode: taint
+    pattern-sources: *sources
+    pattern-sanitizers: *sanitizers
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: GeneralUtility::getUrl($URL, ...)
+              - pattern: $RF->request($URL, ...)
+              - pattern: curl_init($URL)
+              - pattern: curl_setopt($CH, CURLOPT_URL, $URL)
+          - focus-metavariable: $URL
+
+  - id: typo3-tainted-exec
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Request data reaches a shell command (command injection). Pass it through escapeshellarg(), or
+      better, avoid the shell.
+    metadata:
+      category: security
+      cwe: ["CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"]
+      owasp: ["A03:2021 - Injection"]
+      confidence: MEDIUM
+      likelihood: MEDIUM
+      impact: HIGH
+    mode: taint
+    pattern-sources: *sources
+    pattern-sanitizers:
+      - pattern: escapeshellarg(...)
+      - pattern: CommandUtility::escapeShellArgument(...)
+      - pattern: (int) $X
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: CommandUtility::exec($CMD, ...)
+              - pattern: exec($CMD, ...)
+              - pattern: shell_exec($CMD)
+              - pattern: system($CMD, ...)
+              - pattern: passthru($CMD, ...)
+              - pattern: proc_open($CMD, ...)
+              - pattern: popen($CMD, ...)
+          - focus-metavariable: $CMD
+
+  - id: typo3-tainted-html-response
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Request data is written into an HTML response without escaping (cross-site scripting). Escape it
+      with htmlspecialchars(), or render it through a Fluid template.
+    metadata:
+      category: security
+      cwe: ["CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"]
+      owasp: ["A03:2021 - Injection"]
+      confidence: MEDIUM
+      likelihood: MEDIUM
+      impact: MEDIUM
+    mode: taint
+    pattern-sources: *sources
+    pattern-sanitizers:
+      - pattern: htmlspecialchars(...)
+      - pattern: htmlentities(...)
+      - pattern: strip_tags(...)
+      - pattern: json_encode(...)
+      - pattern: (int) $X
+      - pattern: intval(...)
+      - pattern: GeneralUtility::quoteJSvalue(...)
+      - pattern: fread(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: new HtmlResponse($HTML, ...)
+              - pattern: $BODY->write($HTML)
+              - pattern: echo $HTML;
+              - pattern: print($HTML)
+          - focus-metavariable: $HTML

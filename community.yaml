@@ -1,0 +1,45 @@
+# Community rules copied into the image from opengrep/opengrep-rules.
+# They are licensed under LGPL-2.1 with the Commons Clause and are not stored in this repository.
+repository: https://github.com/opengrep/opengrep-rules
+commit: f1d2b562b414783763fd02a6ed2736eaed622efa
+
+# Rule files to copy, as globs relative to the repository root
+include:
+  - php/lang/security/**/*.yaml
+  - php/doctrine/security/**/*.yaml
+  - php/symfony/security/**/*.yaml
+  - javascript/lang/security/**/*.yaml
+  - javascript/browser/security/**/*.yaml
+  - javascript/jquery/security/**/*.yaml
+  - javascript/vue/security/**/*.yaml
+  - typescript/lang/security/**/*.yaml
+  - typescript/react/security/**/*.yaml
+  - generic/secrets/**/*.yaml
+
+# Rule files to leave out, by path. The build fails if one no longer exists upstream.
+disable:
+  # Matches the labels in global-password.yaml; we don't use Terraform
+  - generic/secrets/gitleaks/hashicorp-tf-password.yaml
+  # Matches base64 data URIs in CSS
+  - generic/secrets/gitleaks/aws-access-token.yaml
+  # Google Maps browser keys in constants.typoscript are public by design
+  - generic/secrets/security/detected-google-api-key.yaml
+  - generic/secrets/security/detected-google-cloud-api-key.yaml
+  - generic/secrets/gitleaks/gcp-api-key.yaml
+  # Matches every TYPO3 $this->redirect() and ll_catalog $this->redirect(781)
+  - php/symfony/security/audit/symfony-non-literal-redirect.yaml
+  # Fires on $queryBuilder->createNamedParameter(), the safe way to build a query; typo3-tainted-sql covers this
+  - php/doctrine/security/audit/doctrine-orm-dangerous-query.yaml
+  # md5() and sha1() are used for cache identifiers, not passwords
+  - php/lang/security/weak-crypto.yaml
+  # typo3-unserialize-without-allowed-classes covers this and allows unserialize() with options
+  - php/lang/security/unserialize-use.yaml
+  # Fires on the same lines as insecure-innerhtml
+  - javascript/browser/security/insecure-document-method.yaml
+
+# Severity changes, by path
+severity:
+  # Mostly template strings built from translations; reported, but doesn't fail the job
+  javascript/browser/security/insecure-innerhtml.yaml: WARNING
+  # Flags every exec(), including ones whose arguments go through escapeshellarg(); typo3-tainted-exec fails the job
+  php/lang/security/exec-use.yaml: WARNING

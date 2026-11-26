@@ -1,0 +1,49 @@
+rules:
+  - id: typo3-unserialize-without-allowed-classes
+    languages: [php]
+    severity: WARNING
+    message: >-
+      unserialize() without ['allowed_classes' => false] can create any object, which attackers use for
+      PHP object injection. Use json_decode(), or pass ['allowed_classes' => false] (or a list of classes).
+    metadata:
+      category: security
+      cwe: ["CWE-502: Deserialization of Untrusted Data"]
+      owasp: ["A08:2021 - Software and Data Integrity Failures"]
+      confidence: HIGH
+      likelihood: LOW
+      impact: HIGH
+    patterns:
+      - pattern: unserialize($X)
+      - pattern-not: unserialize($X, $OPTIONS)
+
+  - id: typo3-viewhelper-escape-output-disabled
+    languages: [php]
+    severity: INFO
+    message: >-
+      This ViewHelper turns off Fluid's output escaping, so whatever it returns is printed as raw HTML.
+      Escape every value that isn't already safe HTML (htmlspecialchars()) before returning it.
+    metadata:
+      category: security
+      subcategory: [audit]
+      cwe: ["CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"]
+      confidence: LOW
+      likelihood: LOW
+      impact: MEDIUM
+    pattern-regex: protected\s+(bool\s+)?\$escapeOutput\s*=\s*false
+
+  - id: typo3-insecure-system-setting
+    languages: [php]
+    severity: WARNING
+    paths:
+      include: ["config/system/*.php", "*/LocalConfiguration.php", "*/AdditionalConfiguration.php"]
+    message: >-
+      This TYPO3 setting is unsafe in production: a trustedHostsPattern of '.*' allows host header
+      injection, and a devIPmask of '*' shows debug output to every visitor.
+    metadata:
+      category: security
+      cwe: ["CWE-16: Configuration"]
+      confidence: HIGH
+      likelihood: MEDIUM
+      impact: MEDIUM
+    pattern-regex: >-
+      (trustedHostsPattern['"]\]?\s*(=>|=)\s*['"]\.\*['"]|devIPmask['"]\]?\s*(=>|=)\s*['"]\*['"])

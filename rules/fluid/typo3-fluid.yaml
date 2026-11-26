@@ -1,0 +1,115 @@
+rules:
+  - id: typo3-fluid-raw-in-attribute
+    languages: [regex]
+    severity: WARNING
+    paths:
+      include: ["*.html"]
+    message: >-
+      f:format.raw() inside an HTML attribute lets a quote in the value end the attribute and add event
+      handlers. Remove f:format.raw() so Fluid escapes the value, or build the attribute with a tag
+      ViewHelper's additionalAttributes.
+    metadata:
+      category: security
+      cwe: ["CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"]
+      confidence: MEDIUM
+      likelihood: MEDIUM
+      impact: MEDIUM
+    patterns:
+      - pattern-regex: =\s*"[^"<>]*\{[^}"]*->\s*f:format\.raw\(\)[^}"]*\}
+      # ke_search escapes searchword itself, so its templates print it raw to avoid double escaping
+      - pattern-not-regex: \{searchword\s*->\s*f:format\.raw\(\)\}
+
+  - id: typo3-fluid-variable-in-event-handler
+    languages: [regex]
+    severity: WARNING
+    paths:
+      include: ["*.html"]
+    message: >-
+      A Fluid variable inside an on* attribute isn't protected by Fluid's escaping: the browser decodes
+      &#039; back to a quote before running the JavaScript. Pass the value in a data- attribute and read
+      it from a script file instead.
+    metadata:
+      category: security
+      cwe: ["CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"]
+      confidence: MEDIUM
+      likelihood: MEDIUM
+      impact: MEDIUM
+    patterns:
+      - pattern-regex: \son[a-z]+\s*=\s*"[^"]*\{[a-zA-Z_][^}]*\}
+      # felogin passes its own JavaScript in onSubmit
+      - pattern-not-regex: \sonsubmit="\{onSubmit\}"
+
+  - id: typo3-fluid-raw-inside-script
+    languages: [generic]
+    severity: WARNING
+    paths:
+      include: ["*.html"]
+    message: >-
+      f:format.raw() inside a <script> block prints the value as code. Use f:format.json() for values
+      used in JavaScript, or pass them in a data- attribute.
+    metadata:
+      category: security
+      cwe: ["CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"]
+      confidence: MEDIUM
+      likelihood: MEDIUM
+      impact: MEDIUM
+    options:
+      generic_ellipsis_max_span: 500
+    patterns:
+      - pattern-inside: |
+          <script ...> ... </script>
+      - pattern-regex: f:format\.raw\(\)|<f:format\.raw>
+      # JSON is safe to print raw: json_encode() escapes "/", so a value can't close the </script> tag
+      - pattern-not-regex: (f:format\.json\([^)]*\)|json\.encode\([^)]*\))\s*->\s*f:format\.raw\(\)
+
+  - id: typo3-fluid-htmlentities-decode
+    languages: [regex]
+    severity: WARNING
+    paths:
+      include: ["*.html"]
+    message: >-
+      f:format.htmlentitiesDecode turns escaped entities back into HTML, so a value that was safe to
+      print can contain working tags again. Only use it on values you control, and never print the
+      result inside f:format.raw.
+    metadata:
+      category: security
+      cwe: ["CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"]
+      confidence: LOW
+      likelihood: LOW
+      impact: MEDIUM
+    pattern-regex: <f:format\.htmlentitiesDecode\b|->\s*f:format\.htmlentitiesDecode\(
+
+  - id: typo3-fluid-raw-on-plain-text-field
+    languages: [regex]
+    severity: WARNING
+    paths:
+      include: ["*.html"]
+    message: >-
+      This field is plain text (a header, title, name, label or alt text), so it should be escaped, not
+      printed raw. Remove f:format.raw(); if the field has line breaks, use f:format.nl2br() instead.
+    metadata:
+      category: security
+      cwe: ["CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"]
+      confidence: MEDIUM
+      likelihood: LOW
+      impact: MEDIUM
+    patterns:
+      - pattern-regex: \{[a-zA-Z_.]*\.(header|subheader|title|name|label|alt)\s*->\s*f:format\.raw\(\)\}|<f:format\.raw>\{[a-zA-Z_.]*\.(header|subheader|title|name|label|alt)\}
+      # ke_search escapes result titles itself before highlighting the search words in them
+      - pattern-not-regex: \{resultrow\.title\}
+
+  - id: typo3-fluid-debug-output
+    languages: [regex]
+    severity: WARNING
+    paths:
+      include: ["*.html"]
+    message: >-
+      f:debug prints variables (records, settings, sometimes user data) to every visitor. Remove it
+      before merging.
+    metadata:
+      category: security
+      cwe: ["CWE-489: Active Debug Code"]
+      confidence: HIGH
+      likelihood: MEDIUM
+      impact: LOW
+    pattern-regex: <f:debug\b|->\s*f:debug\(

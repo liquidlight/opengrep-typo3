@@ -1,0 +1,17 @@
+extends: default
+
+ignore: |
+  /build/
+
+rules:
+  document-start: disable
+  # Rule messages are long, and some regexes can't be wrapped
+  line-length:
+    max: 200
+    allow-non-breakable-inline-mappings: true
+  # GitHub Actions uses `on:` as a key
+  truthy:
+    check-keys: false
+  # Actions pinned to a commit carry their version as a comment after it
+  comments:
+    min-spaces-from-content: 1
