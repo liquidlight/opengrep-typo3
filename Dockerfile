@@ -23,7 +23,7 @@ RUN apk add --no-cache curl \
 	&& chmod +x /opengrep
 
 # Builds the rules and fails the image if any rule is invalid or its tests fail
-FROM python:3.13-alpine AS rules
+FROM python:3.15-alpine AS rules
 RUN apk add --no-cache git && pip install --no-cache-dir pyyaml==6.0.3
 COPY --from=opengrep /opengrep /usr/local/bin/opengrep
 WORKDIR /build
